@@ -488,7 +488,10 @@ CreateThread(function()
 					RageUI.List('Siren Box Scheme', AUDIO.schemes, AUDIO.scheme_index, 'Change what SFX to use for siren box clicks. Press ~b~Enter~s~ to demo the scheme.', {}, true, {
 					  onListChange = function(Index, Item)
 						AUDIO.scheme_index = Index
-						AUDIO.scheme = Value
+						AUDIO.scheme = AUDIO.schemes[AUDIO.scheme_index]
+						if HUD.ApplyHudModuleFromScheme ~= nil then
+							HUD:ApplyHudModuleFromScheme(false)
+						end
 					  end,
 					  onSelected = function(Index, Item)
 						AUDIO:Play('Upgrade', AUDIO.upgrade_volume)

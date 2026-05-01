@@ -26,15 +26,258 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ]]
 HUD = { }
 
+-- HUD UI modules live in UI/modules/<name>/html/index.html.
+-- Each module keeps its own html/, textures/, and sounds/ folders.
+-- Add future controller UIs here, then place their files in UI/modules/<name>/.
+HUD_UI_MODULES = HUD_UI_MODULES or {
+	default = 'ZTEP103',
+	wecanx = 'WECANX',
+	ui2 = 'UI 2',
+	ztep103 = 'ZTEP103',
+	pathfinder = 'Pathfinder',
+}
+
+-- UI is selected from the active AUDIO scheme in the VCF XML.
+-- Example: <SCHEME String="ZTEP103"/> loads UI/modules/ztep103/.
+-- Add mappings here only when the scheme name and module folder name differ.
+HUD_SCHEME_UI_MODULES = HUD_SCHEME_UI_MODULES or {
+	default = 'default',
+	ztep103 = 'ztep103',
+}
+
 local HUD_temp_hidden = false
 local HUD_scale
 local HUD_pos 
 local HUD_backlight_state = false
+local HUD_module = 'default'
+
+local function GetHudSirenToneState(tone)
+	tone = tonumber(tone) or 0
+	if tone <= 0 then
+		return false
+	end
+
+	local tone_data = nil
+	if SIRENS ~= nil then
+		tone_data = SIRENS[tone]
+	end
+
+	if type(tone_data) == 'table' then
+		for _, value in pairs(tone_data) do
+			if type(value) == 'string' then
+				local lowered = string.lower(value)
+				if string.find(lowered, 'wail', 1, true) then
+					return 'siren_t1'
+				end
+			end
+		end
+	end
+
+	if tone == 1 then
+		return 'siren_t1'
+	end
+
+	return 'siren_t2'
+end
+
+local function GetStageAwareSwitchState()
+	if veh == nil or veh == 0 or not IsVehicleSirenOn(veh) then
+		return 'switch_1'
+	end
+
+	-- If the current vehicle has a stages profile, the switch is the stage selector:
+	-- stage 1 -> switch_2
+	-- stage 2 -> switch_3
+	-- stage 3+ -> switch_4
+	if state_stage ~= nil and state_stage[veh] ~= nil and state_stage[veh].hasStages then
+		local stage = tonumber(state_stage[veh].current_stage) or 1
+
+		if stage <= 1 then
+			return 'switch_2'
+		elseif stage == 2 then
+			return 'switch_3'
+		else
+			return 'switch_4'
+		end
+	end
+
+	-- No stages setup: the switch is only lights OFF/ON.
+	return 'switch_4'
+end
+
+local function GetHudSwitchState()
+	return GetStageAwareSwitchState()
+end
+
+local function ShouldHudDisplayNow()
+	return HUD.enabled == true
+		and player_is_emerg_driver == true
+		and IsHudHidden() ~= 1
+		and IsPauseMenuActive() ~= 1
+		and not IsWarningMessageActive()
+end
+
+local function GetHudModuleList()
+	local modules = {}
+	for module_name, _ in pairs(HUD_UI_MODULES) do
+		modules[#modules + 1] = module_name
+	end
+	table.sort(modules)
+	return table.concat(modules, ', ')
+end
+
+local function NormalizeHudModuleName(value)
+	if value == nil then
+		return nil
+	end
+
+	local module_name = string.lower(tostring(value))
+	module_name = module_name:gsub('^%s+', ''):gsub('%s+$', '')
+	module_name = module_name:gsub('%s+', '_')
+	module_name = module_name:gsub('[^%w_-]', '')
+
+	if module_name == '' then
+		return nil
+	end
+
+	return module_name
+end
+
+local function IsHudModuleValid(module_name)
+	return module_name ~= nil and HUD_UI_MODULES[module_name] ~= nil
+end
+
+local function ResolveHudModuleFromScheme(scheme_name)
+	local normalized_scheme = NormalizeHudModuleName(scheme_name)
+	if normalized_scheme == nil then
+		return 'default'
+	end
+
+	local mapped_module = HUD_SCHEME_UI_MODULES[normalized_scheme] or normalized_scheme
+	mapped_module = NormalizeHudModuleName(mapped_module) or 'default'
+
+	if IsHudModuleValid(mapped_module) then
+		return mapped_module
+	end
+
+	return 'default'
+end
+
+function HUD:GetHudModule()
+	return HUD_module
+end
+
+function HUD:GetHudModuleFromCurrentScheme()
+	local scheme_name = nil
+
+	if AUDIO ~= nil then
+		local scheme_index = tonumber(AUDIO.scheme_index) or 1
+
+		if type(AUDIO.schemes) == 'table' then
+			scheme_name = AUDIO.schemes[scheme_index]
+		end
+
+		if scheme_name == nil then
+			scheme_name = AUDIO.scheme
+		end
+	end
+
+	return ResolveHudModuleFromScheme(scheme_name)
+end
+
+function HUD:ApplyHudModuleFromScheme(silent)
+	local module_name = self:GetHudModuleFromCurrentScheme()
+
+	if module_name == HUD_module then
+		return true
+	end
+
+	return self:SetHudModule(module_name, true, silent)
+end
+
+function HUD:SetHudModule(module_name, skip_save, silent)
+	if module_name == nil then
+		return false
+	end
+
+	module_name = string.lower(tostring(module_name))
+
+	if not IsHudModuleValid(module_name) then
+		if skip_save then
+			module_name = 'default'
+		else
+			HUD:ShowNotification('~b~LVC: ~r~UI invalide~s~: ' .. module_name .. '. UIs: ' .. GetHudModuleList(), true)
+			return false
+		end
+	end
+
+	HUD_module = module_name
+
+	-- Important: cache the real visibility before loading/swapping modules.
+	-- Without this, the iframe can replay an old visible HUD while the player is on foot.
+	HUD:SetItemState('hud', ShouldHudDisplayNow())
+
+	SendNUIMessage({
+		_type = 'ui:setModule',
+		module = HUD_module,
+	})
+
+	-- Give the iframe time to load, then replay the important HUD state.
+	CreateThread(function()
+		Wait(300)
+
+		if HUD_pos ~= nil then
+			HUD:SetHudPosition(HUD_pos)
+		end
+
+		if HUD_scale ~= nil then
+			HUD:SetHudScale(HUD_scale)
+		else
+			SendNUIMessage({ _type = 'hud:getHudScale' })
+		end
+
+		if HUD_backlight_state then
+			HUD:SetItemState('time', 'night')
+		else
+			HUD:SetItemState('time', 'day')
+		end
+
+		HUD:SetHudState(HUD.enabled or false, true)
+
+		if veh ~= nil and veh ~= 0 then
+			HUD:RefreshHudItemStates()
+		end
+	end)
+
+	if not silent and not skip_save then
+		HUD:ShowNotification('~b~LVC: ~g~UI changée~s~: ' .. HUD_module, true)
+	end
+
+	return true
+end
+
+RegisterCommand('lvcsetui', function(source, args)
+	local module_name = args[1]
+
+	if module_name == nil or module_name == '' then
+		HUD:ShowNotification('~b~LVC: ~s~Utilisation test: /lvcsetui [' .. GetHudModuleList() .. ']. Auto = SCHEME XML.', true)
+		return
+	end
+
+	HUD:SetHudModule(module_name)
+end)
+
+RegisterCommand('lvcuis', function()
+	HUD:ShowNotification('~b~LVC UIs: ~s~' .. GetHudModuleList() .. ' ~c~(auto via SCHEME XML)', true)
+end)
 
 ---------------------------------------------------------------------
 --[[Gets initial HUD scale from JS]]
 CreateThread(function()
-	Wait(1000)
+	Wait(500)
+	HUD:ApplyHudModuleFromScheme(true)
+	HUD:SetHudModule(HUD_module, true, true)
+	Wait(500)
 	SendNUIMessage({
 	  _type = 'hud:getHudScale',
 	})
@@ -88,7 +331,15 @@ function HUD:SetHudState(state, temporary)
 	if not temporary then
 		self.enabled = state
 	end
-	HUD:SetItemState('hud', state)
+
+	-- HUD.enabled is the saved preference. The NUI visibility must still be
+	-- gated to the current context so the controller never appears on foot.
+	local display_state = state == true
+	if display_state then
+		display_state = ShouldHudDisplayNow()
+	end
+
+	HUD:SetItemState('hud', display_state)
 end
 
 ------------------------------------------------
@@ -118,6 +369,24 @@ end )
 ------------------------------------------------
 --[[Toggles HUD images based on their state on/off]]
 function HUD:SetItemState(item, state)
+	-- Older code can still send switch true/false.
+	-- Convert it to the current stage-aware switch state before sending to NUI.
+	if item == 'switch' and type(state) == 'boolean' then
+		state = GetHudSwitchState()
+	end
+
+	-- Handsfree has visual priority over every normal siren state.
+	-- Only manual siren is allowed to override it visually.
+	if item == 'siren'
+		and state_handsfree ~= nil
+		and veh ~= nil
+		and veh ~= 0
+		and state_handsfree[veh] == true
+		and state ~= 'siren_wail'
+		and state ~= 'siren_yelp' then
+		state = 'siren_hf'
+	end
+
 	SendNUIMessage({
 	  _type = 'hud:setItemState',
 	  item  = item,
@@ -162,34 +431,62 @@ end
 
 ------------------------------------------------
 --[[Verifies HUD item states are correct]]
+local function GetHudAlleyState()
+	if veh == nil or veh == 0 or state_alley == nil or state_alley[veh] == nil then
+		return nil
+	end
+
+	return state_alley[veh]
+end
+
 function HUD:RefreshHudItemStates()
-	if state_lxsiren[veh] ~= nil and state_lxsiren[veh] > 0 or actv_lxsrnmute_temp then
-		HUD:SetItemState('siren', true)
+	if actv_manu then
+		if actv_horn then
+			HUD:SetItemState('siren', 'siren_yelp')
+		else
+			HUD:SetItemState('siren', 'siren_wail')
+		end
+	elseif state_handsfree ~= nil and state_handsfree[veh] == true then
+		HUD:SetItemState('siren', 'siren_hf')
+	elseif state_lxsiren[veh] ~= nil and state_lxsiren[veh] > 0 then
+		HUD:SetItemState('siren', GetHudSirenToneState(state_lxsiren[veh]))
+	elseif state_auxiliary[veh] ~= nil and state_auxiliary[veh] > 0 then
+		HUD:SetItemState('siren', GetHudSirenToneState(state_auxiliary[veh]))
+	elseif actv_lxsrnmute_temp then
+		HUD:SetItemState('siren', 'siren_t2')
 	else
 		HUD:SetItemState('siren', false)
 	end
 	
-	if state_auxiliary[veh] ~= nil and state_auxiliary[veh] > 0 then
-		HUD:SetItemState('siren', true)
-	end
-	
-	if state_airmanu[veh] ~= nil and state_airmanu[veh] > 0 then
+	if actv_manu then
+		HUD:SetItemState('horn', false)
+	elseif state_airmanu[veh] ~= nil and state_airmanu[veh] > 0 then
 		HUD:SetItemState('horn', true)
 	else
 		HUD:SetItemState('horn', false)
 	end
 	
-	if state_tkd ~= nil and state_tkd[veh] ~= nil and state_tkd[veh] then
+	local alley_state = GetHudAlleyState()
+	local alley_front_active = alley_state ~= nil and alley_state.front == true
+	local alley_left_active = alley_state ~= nil and alley_state.left == true
+	local alley_right_active = alley_state ~= nil and alley_state.right == true
+
+	if (state_tkd ~= nil and state_tkd[veh] ~= nil and state_tkd[veh]) or alley_front_active then
 		HUD:SetItemState('tkd', true)
 	else
 		HUD:SetItemState('tkd', false)
 	end
+
+	HUD:SetItemState('leftalley', alley_left_active)
+	HUD:SetItemState('rightalley', alley_right_active)
+
 	
 	if key_lock then
 		HUD:SetItemState('lock', true)
 	else
 		HUD:SetItemState('lock', false)
 	end
+
 	
 	if state_ta ~= nil and state_ta[veh] ~= nil then
 		HUD:SetItemState('ta', state_ta[veh])
@@ -197,7 +494,7 @@ function HUD:RefreshHudItemStates()
 		HUD:SetItemState('ta', 0)
 	end	
 	
-	HUD:SetItemState('switch', IsVehicleSirenOn(veh))
+	HUD:SetItemState('switch', GetHudSwitchState())
 end
 
 ------------------------------------------------
