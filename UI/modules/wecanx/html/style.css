@@ -1,0 +1,125 @@
+body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    user-select: none;
+}
+
+#sirenbox {
+    display: none;
+    position: absolute;
+    overflow: hidden;
+    width: 988px;
+    height: 517px;
+    left: 0%;
+    top: 68%;
+    transform-origin: left top;
+    transform: scale(0.60);
+    background-image: url("../textures/day/background.png");
+    background-repeat: no-repeat;
+    background-size: 988px 517px;
+}
+
+.wc-button,
+.wc-manual,
+.wc-horn,
+.wc-switch,
+.wc-siren {
+    position: absolute;
+    z-index: 900;
+    pointer-events: none;
+}
+
+.wc-button img {
+    display: block;
+    width: 91px;
+    height: 78px;
+}
+
+.wc-manual img {
+    display: block;
+    width: 207px;
+    height: 101px;
+}
+
+.wc-horn img {
+    display: block;
+    width: 212px;
+    height: 91px;
+}
+
+.wc-switch img {
+    display: block;
+    width: 228px;
+    height: 156px;
+}
+
+.wc-siren img {
+    display: block;
+    width: 331px;
+    height: 244px;
+}
+
+/* Top row */
+#leftalley-button {
+    left: 52px;
+    top: 39px;
+}
+
+#rightalley-button {
+    left: 165px;
+    top: 39px;
+}
+
+#tkd-button {
+    left: 277px;
+    top: 39px;
+}
+
+#scene-button {
+    left: 392px;
+    top: 39px;
+}
+
+#cruise-button {
+    left: 506px;
+    top: 39px;
+}
+
+#rumbler-button {
+    left: 619px;
+    top: 39px;
+}
+
+#pier-button {
+    left: 731px;
+    top: 39px;
+}
+
+#blackout-button {
+    left: 846px;
+    top: 39px;
+}
+
+/* Right middle */
+#manual-button {
+    left: 634px;
+    top: 148px;
+}
+
+#horn-button {
+    left: 634px;
+    top: 266px;
+}
+
+/* Lower left switch */
+#switch-button {
+    left: 47px;
+    top: 228px;
+}
+
+/* Center rotary */
+#siren-button {
+    left: 310px;
+    top: 145px;
+}
