@@ -2,6 +2,23 @@
 <img align="center" width="600" src="https://i.imgur.com/7d78UK8.png">
 </p>
 
+This is my heavily modified branch of Luxart Vehicle Control - Fleet. This was originally made for my community, but I believe the additions
+made to it can be benefited by the whole community.
+
+I wish to thank the original creators of LVC (Caine, TrevorBarns) for giving us this amazing script to work on.
+
+This branch features a bunch of additions, here are some:
+  * Toggleable handsfree mode, with UI Element (optional), press Y to enable
+  * UI elements for extra_controls (ex: cruise lights, blackout, etc)
+  * Switch / Stage system:
+      * A vehicle which dose not have a setup in Stages plugin only displays switch 1 for off, 4 for lights on
+      * A vehicle which does have a setup in stages will cycle the switch for each stage
+  * Multi-UI Support
+      * Drop your custom UI's in UI>Modules folder
+      * UIs are loaded through the scheme section of a siren's .xml file
+   
+  * Comes with 2 UIs, Whelen WecanX and Federal Signal Pathfinder, if you wish to have a custom UI made, please let me know.
+
 ## More Information:
 ### Documentation and About: [Welcome to Luxart Engineering - Gitbook](https://www.luxartengineering.com/)
 
