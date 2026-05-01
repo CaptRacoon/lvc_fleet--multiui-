@@ -6,25 +6,28 @@
 		<HORNS>
 		<!--1==================================================================================================================================================================================================================-->
 			<HORN Name="AIRHORN" 	Option="1"	ResidentString=	"SIRENS_AIRHORN"
-												String=			"" 		Ref=	"" 	Bank= ""
-												RumblerString=	""	RumblerRef=	"" 	RumblerBank=""/>
+												String=			"SSP2000B_HORN" 		Ref=	"OTHER_SOUNDSET" 	Bank= "DLC_FIVEQC\\OTHER"
+												RumblerString=	"SSP2000B_HORN"	RumblerRef=	"" 	RumblerBank=""/>
 		<!--===================================================================================================================================================================================================================-->
 		</HORNS>
 		<SIRENS>
 		<!--1==================================================================================================================================================================================================================-->
 			<SIREN Name="WAIL" 		Option="1"	ResidentString=	"VEHICLES_HORNS_SIREN_1"
-												String=			"" 		Ref=	"" 	Bank= ""
-												RumblerString=	""	RumblerRef=	"" 	RumblerBank=""/>
+												String=			"SSP2000B_WAIL" 		Ref=	"OTHER_SOUNDSET" 	Bank= "DLC_FIVEQC\\OTHER"
+												RumblerString=	"SSP2000B_LOW_WAIL"	RumblerRef=	"OTHER_SOUNDSET" 	RumblerBank="DLC_FIVEQC\\OTHER"/>
 		<!--2==================================================================================================================================================================================================================-->
 			<SIREN Name="YELP" 		Option="1"	ResidentString=	"VEHICLES_HORNS_SIREN_2"
-												String=			"" 		Ref=	"" 	Bank= ""
-												RumblerString=	""	RumblerRef=	"" 	RumblerBank=""/>
+												String=			"SSP2000B_YELP" 		Ref=	"OTHER_SOUNDSET" 	Bank= "DLC_FIVEQC\\OTHER"
+												RumblerString=	"SSP2000B_LOW_YELP"	RumblerRef=	"OTHER_SOUNDSET" 	RumblerBank="DLC_FIVEQC\\OTHER"/>
 		<!--3==================================================================================================================================================================================================================-->
 			<SIREN Name="PRIORITY" 	Option="1"	ResidentString=	"VEHICLES_HORNS_POLICE_WARNING"
-												String=			"" 	Ref=		"" 	Bank= ""
-												RumblerString=	""	RumblerRef=	"" 	RumblerBank=""/>
-		<!--===================================================================================================================================================================================================================-->
-		</SIRENS>
+												String=			"SSP2000B_PRIORITY" 	Ref=		"OTHER_SOUNDSET" 	Bank= "DLC_FIVEQC\\OTHER"
+												RumblerString=	"SSP2000B_LOW_PRIORITY"	RumblerRef=	"OTHER_SOUNDSET" 	RumblerBank="DLC_FIVEQC\\OTHER"/>
+		<!--3==================================================================================================================================================================================================================-->
+			<SIREN Name="PRIORITY" 	Option="1"	ResidentString=	"VEHICLES_HORNS_POLICE_WARNING"
+												String=			"SSP2000B_HILO" 	Ref=		"OTHER_SOUNDSET" 	Bank= "DLC_FIVEQC\\OTHER"
+												RumblerString=	"SSP2000B_LOW_HILO"	RumblerRef=	"OTHER_SOUNDSET" 	RumblerBank="DLC_FIVEQC\\OTHER"/>
+		<!--===================================================================================================================================================================================================================-->		</SIRENS>
 	</TONES>
 	<!-- SIREN OPTIONS -->	
 	<SIREN_CONFIG>
@@ -36,8 +39,8 @@
 		<Reset_Standby Enabled="true"/>
 		<Park_Kill Enabled="true"/>
 		<Peer_Override Enabled="false"/>
-		<Local_Override Enabled="true"/>
-		<Rumbler Enabled="false"/>
+		<Local_Override Enabled="false"/> <!-- Change to false if running Server Sided Sirens -->
+		<Rumbler Enabled="true"/>
 	</SIREN_CONFIG>
 	<!-- HUD SETTINGS -->	
 	<HUD Enabled="true" Backlight_Mode="1"/>
@@ -50,20 +53,16 @@
 		<Activity_Reminder_Interval_Index Val="1"/>
 		<Scheme_Index Val="1"/>
 		<SCHEMES>
-			<SCHEME String="SSP2000"/>
-			<SCHEME String="SSP3000"/>
-			<SCHEME String="Cencom"/>
-			<SCHEME String="ST300"/>
-			<SCHEME String="Code3-MCB"/>
+			<SCHEME String="PATHFINDER"/>
 		</SCHEMES>
-		<On_Volume Val="0.5"/>
-		<Off_Volume Val="0.7"/>
-		<Upgrade_Volume Val="0.5"/>
-		<Downgrade_Volume Val="0.7"/>
-		<Hazards_Volume Val="0.09"/>
-		<Lock_Volume Val="0.25"/>
-		<Lock_Reminder_Volume Val="0.2"/>
-		<Activity_Reminder_Volume Val="0.09"/>
+		<On_Volume Val="1.5"/>
+		<Off_Volume Val="1.7"/>
+		<Upgrade_Volume Val="1"/>
+		<Downgrade_Volume Val="1.7"/>
+		<Hazards_Volume Val="1.09"/>
+		<Lock_Volume Val="1"/>
+		<Lock_Reminder_Volume Val="1.2"/>
+		<Activity_Reminder_Volume Val="1"/>
 	</AUDIO>
 	<!-- MENU PERMISSIONS -->
 	<MENU>
