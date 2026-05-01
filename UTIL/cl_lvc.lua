@@ -39,6 +39,7 @@ state_lxsiren = {}
 state_auxiliary = {}
 state_airmanu = {}
 state_mode = {}
+state_handsfree = {}
 
 actv_manu = false
 actv_horn = false
@@ -77,10 +78,216 @@ local snd_airmanu = {}
 
 local loaded_banks = {}
 
+local handsfree_last_horn_press = {}
+local handsfree_doubletap_ms = 350
+
 local update_data = {}
 
 --	Local fn forward declaration
 local RegisterKeyMaps, MakeOrdinal
+
+-- Refresh siren HUD without changing audio logic.
+-- Normal sirens still use the legacy true/false state for compatibility.
+-- Manual siren gets dedicated UI states:
+--   siren_wail = primary manual / main manual
+--   siren_yelp = secondary manual / aux manual
+local function GetSirenHudToneState(tone)
+	tone = tonumber(tone) or 0
+	if tone <= 0 then
+		return false
+	end
+
+	-- Prefer detecting WAIL from the loaded VCF data, so custom tone orders still work.
+	-- Fallback: tone 1 is treated as WAIL, every other tone as T2.
+	local tone_data = nil
+	if SIRENS ~= nil then
+		tone_data = SIRENS[tone]
+	end
+
+	if type(tone_data) == 'table' then
+		for _, value in pairs(tone_data) do
+			if type(value) == 'string' then
+				local lowered = string.lower(value)
+				if string.find(lowered, 'wail', 1, true) then
+					return 'siren_t1'
+				end
+			end
+		end
+	end
+
+	if tone == 1 then
+		return 'siren_t1'
+	end
+
+	return 'siren_t2'
+end
+
+local function GetStageAwareSwitchState()
+	if veh == nil or veh == 0 or not IsVehicleSirenOn(veh) then
+		return 'switch_1'
+	end
+
+	-- If the current vehicle has a stages profile, the switch is the stage selector:
+	-- stage 1 -> switch_2
+	-- stage 2 -> switch_3
+	-- stage 3+ -> switch_4
+	if state_stage ~= nil and state_stage[veh] ~= nil and state_stage[veh].hasStages then
+		local stage = tonumber(state_stage[veh].current_stage) or 1
+
+		if stage <= 1 then
+			return 'switch_2'
+		elseif stage == 2 then
+			return 'switch_3'
+		else
+			return 'switch_4'
+		end
+	end
+
+	-- No stages setup: the switch is only lights OFF/ON.
+	return 'switch_4'
+end
+
+local function IsHandsfreeEnabled(vehicle)
+	return vehicle ~= nil and vehicle ~= 0 and state_handsfree[vehicle] == true
+end
+
+local function RefreshSwitchHudState()
+	if HUD == nil or veh == nil then
+		return
+	end
+
+	HUD:SetItemState('switch', GetStageAwareSwitchState())
+end
+
+local function RefreshSirenHudState()
+	if HUD == nil or veh == nil then
+		return
+	end
+
+	if actv_manu then
+		if actv_horn then
+			HUD:SetItemState('siren', 'siren_yelp')
+		else
+			HUD:SetItemState('siren', 'siren_wail')
+		end
+	elseif IsHandsfreeEnabled(veh) then
+		HUD:SetItemState('siren', 'siren_hf')
+	elseif state_lxsiren[veh] ~= nil and state_lxsiren[veh] > 0 then
+		HUD:SetItemState('siren', GetSirenHudToneState(state_lxsiren[veh]))
+	elseif state_auxiliary[veh] ~= nil and state_auxiliary[veh] > 0 then
+		HUD:SetItemState('siren', GetSirenHudToneState(state_auxiliary[veh]))
+	else
+		HUD:SetItemState('siren', false)
+	end
+
+	RefreshSwitchHudState()
+end
+
+local function GetHandsfreeStartTone()
+	local tone = nil
+
+	if not LVC.reset_standby and LVC.Main_Mem ~= nil then
+		local option = UTIL:GetToneOption(LVC.Main_Mem)
+		if option ~= 3 and option ~= 4 then
+			tone = LVC.Main_Mem
+		end
+	end
+
+	if tone == nil then
+		tone = UTIL:GetNextSirenTone(0, veh, true)
+	end
+
+	return tone or 1
+end
+
+local function SetHandsfreeMode(state)
+	if veh == nil or veh == 0 then
+		return
+	end
+
+	state_handsfree[veh] = state == true
+	handsfree_last_horn_press[veh] = 0
+	actv_horn = false
+
+	HUD:SetItemState('horn', false)
+
+	if state_handsfree[veh] then
+		HUD:SetItemState('siren', 'siren_hf')
+	else
+		-- Sirens without flash are only allowed while handsfree is enabled.
+		if not IsVehicleSirenOn(veh) and state_lxsiren[veh] ~= nil and state_lxsiren[veh] > 0 then
+			LVC.Main_Mem = state_lxsiren[veh]
+			SetLxSirenStateForVeh(veh, 0)
+		end
+
+		RefreshSirenHudState()
+	end
+end
+
+local function ToggleHandsfreeMode()
+	if not player_is_emerg_driver or veh == nil or veh == 0 or key_lock then
+		return
+	end
+
+	SetHandsfreeMode(not IsHandsfreeEnabled(veh))
+
+	if IsHandsfreeEnabled(veh) then
+		AUDIO:Play('On', AUDIO.on_volume)
+	else
+		AUDIO:Play('Off', AUDIO.off_volume)
+	end
+
+	AUDIO:ResetActivityTimer()
+end
+
+local function HandleHandsfreeHorn()
+	if not IsHandsfreeEnabled(veh) then
+		return false
+	end
+
+	-- In handsfree, the horn/airhorn is disabled. The horn input only controls siren tones.
+	if IsDisabledControlJustPressed(0, 86) then
+		local now = GetGameTimer()
+		local last = handsfree_last_horn_press[veh] or 0
+		local current_tone = state_lxsiren[veh] or 0
+
+		actv_horn = false
+		HUD:SetItemState('horn', false)
+		AUDIO:ResetActivityTimer()
+
+		if current_tone > 0 and (now - last) <= handsfree_doubletap_ms then
+			LVC.Main_Mem = current_tone
+			SetLxSirenStateForVeh(veh, 0)
+			AUDIO:Play('Downgrade', AUDIO.downgrade_volume)
+			handsfree_last_horn_press[veh] = 0
+		else
+			local new_tone = nil
+
+			if current_tone > 0 then
+				new_tone = UTIL:GetNextSirenTone(current_tone, veh, true)
+			else
+				new_tone = GetHandsfreeStartTone()
+			end
+
+			SetLxSirenStateForVeh(veh, new_tone)
+			AUDIO:Play('Upgrade', AUDIO.upgrade_volume)
+			handsfree_last_horn_press[veh] = now
+		end
+
+		RefreshSirenHudState()
+		return true
+	end
+
+	if IsDisabledControlPressed(0, 86) then
+		actv_horn = false
+		HUD:SetItemState('horn', false)
+		AUDIO:ResetActivityTimer()
+		return true
+	end
+
+	return true
+end
+
 
 ----------------THREADED FUNCTIONS----------------
 --[[ Configuration checking: conflicting resource, conflicting resource, community ID.
@@ -147,6 +354,11 @@ end)
 --Kill siren on Exit
 RegisterNetEvent('lvc:onVehicleExit')
 AddEventHandler('lvc:onVehicleExit', function()
+	if veh ~= nil and veh ~= 0 then
+		state_handsfree[veh] = false
+		handsfree_last_horn_press[veh] = 0
+	end
+
 	if LVC.park_kill then
 		if not LVC.reset_standby and state_lxsiren[veh] ~= 0 then
 			UTIL:SetToneByID('MAIN_MEM', state_lxsiren[veh])
@@ -156,6 +368,7 @@ AddEventHandler('lvc:onVehicleExit', function()
 		SetAirManuStateForVeh(veh, 0)
 		HUD:SetItemState('siren', false)
 		HUD:SetItemState('horn', false)
+		HUD:SetItemState('switch', 'switch_1')
 		count_broadcast_timer = delay_broadcast_timer
 	end
 end)
@@ -170,6 +383,7 @@ AddEventHandler('lvc:onVehicleChange', function()
 		STORAGE:LoadSettings()
 		RegisterKeyMaps()
 		HUD:RefreshHudItemStates()
+		RefreshSwitchHudState()
 		AUDIO:SetRadioState('OFF')
 	end
 end)
@@ -211,6 +425,14 @@ RegisterCommand('lvclock', function(source, args)
 end)
 RegisterKeyMapping('lvclock', 'LVC: Lock out controls', 'keyboard', SETTINGS.lockout_default_hotkey)
 TriggerEvent('chat:addSuggestion', '/lvclock', 'Toggle Luxart Vehicle Control Keybinding Lockout.')
+
+-- Toggle handsfree mode
+RegisterCommand('lvchandsfree', function()
+	ToggleHandsfreeMode()
+end)
+RegisterKeyMapping('lvchandsfree', 'LVC: Toggle handsfree siren mode', 'keyboard', 'Y')
+TriggerEvent('chat:addSuggestion', '/lvchandsfree', 'Toggle Luxart Vehicle Control handsfree siren mode.')
+
 
 --Crash recovery command
 RegisterCommand('lvcrecovercrash', function()
@@ -255,7 +477,7 @@ RegisterKeyMaps = function()
 					if tone_option ~= nil then
 						if tone_option == 1 or tone_option == 3 then
 							if ( state_lxsiren[veh] ~= tone or state_lxsiren[veh] == 0 ) then
-								HUD:SetItemState('siren', true)
+								HUD:SetItemState('siren', GetSirenHudToneState(tone))
 								AUDIO:Play('Upgrade', AUDIO.upgrade_volume)
 								SetLxSirenStateForVeh(veh, tone)
 								count_broadcast_timer = delay_broadcast_timer
@@ -317,10 +539,10 @@ function ReqAudioBank(bank)
 		return
 	end
 
-	while #loaded_banks >= SETTINGS.siren_limit do
-		ReleaseNamedScriptAudioBank(loaded_banks[SETTINGS.siren_limit])
+	while #loaded_banks > 6 do
+		ReleaseNamedScriptAudioBank(loaded_banks[7])
 		ReleaseScriptAudioBank()
-		table.remove(loaded_banks, SETTINGS.siren_limit)
+		table.remove(loaded_banks, 7)
 	end
 	for i,v in ipairs(loaded_banks) do
 		if v == bank then
@@ -348,7 +570,8 @@ BroadcastPlayerVehicleState = function(vehicle)
 			['state_indic'] = state_indic[veh],
 			['state_airmanu'] = state_airmanu[veh],
 			['actv_manu'] = actv_manu,
-			['actv_horn'] = actv_horn
+			['actv_horn'] = actv_horn,
+			['state_handsfree'] = state_handsfree[veh] == true
 		}
 		TriggerEvent('lvc:UpdateThirdParty', update_data)
 	end
@@ -761,16 +984,18 @@ function MainThread()
 					TogMuteDfltSrnForVeh(veh, true)
 
 					--- IF LIGHTS ARE OFF TURN OFF SIREN ---
-					if not IsVehicleSirenOn(veh) and state_lxsiren[veh] > 0 then
+					if not IsVehicleSirenOn(veh) and not IsHandsfreeEnabled(veh) and state_lxsiren[veh] > 0 then
 						--	SAVE TONE BEFORE TURNING OFF
 						if not LVC.reset_standby then
 							LVC.main_mem = state_lxsiren[veh]
 						end
 						SetLxSirenStateForVeh(veh, 0)
+						RefreshSwitchHudState()
 						count_broadcast_timer = delay_broadcast_timer
 					end
-					if not IsVehicleSirenOn(veh) and state_auxiliary[veh] > 0 then
+					if not IsVehicleSirenOn(veh) and not IsHandsfreeEnabled(veh) and state_auxiliary[veh] > 0 then
 						SetAuxiliaryStateForVeh(veh, 0)
+						RefreshSwitchHudState()
 						count_broadcast_timer = delay_broadcast_timer
 					end
 
@@ -782,22 +1007,25 @@ function MainThread()
 								if IsVehicleSirenOn(veh) then
 									AUDIO:Play('Off', AUDIO.off_volume)
 									--	SET NUI IMAGES
-									HUD:SetItemState('switch', false)
-									HUD:SetItemState('siren', false)
+									if IsHandsfreeEnabled(veh) then
+										HUD:SetItemState('siren', 'siren_hf')
+									else
+										HUD:SetItemState('siren', false)
+									end
 									--	TURN OFF SIRENS (R* LIGHTS)
 									SetVehicleSiren(veh, false)
 									if trailer ~= nil and trailer ~= 0 then
 										SetVehicleSiren(trailer, false)
 									end
+									RefreshSwitchHudState()
 								else
 									AUDIO:Play('On', AUDIO.on_volume) -- On
-									--	SET NUI IMAGES
-									HUD:SetItemState('switch', true)
-									--	TURN OFF SIRENS (R* LIGHTS)
+									--	TURN ON SIREN LIGHTS (R* LIGHTS)
 									SetVehicleSiren(veh, true)
 									if trailer ~= nil and trailer ~= 0 then
 										SetVehicleSiren(trailer, true)
 									end
+									RefreshSwitchHudState()
 								end
 								AUDIO:ResetActivityTimer()
 							------ TOG LX SIREN ------
@@ -821,7 +1049,8 @@ function MainThread()
 											end
 										end
 										SetLxSirenStateForVeh(veh, new_tone)
-										HUD:SetItemState('siren', true)
+										HUD:SetItemState('siren', GetSirenHudToneState(new_tone))
+										RefreshSwitchHudState()
 									end
 								else
 									AUDIO:Play('Downgrade', AUDIO.downgrade_volume)
@@ -831,6 +1060,7 @@ function MainThread()
 									end
 									LVC.Main_Mem = state_lxsiren[veh]
 									SetLxSirenStateForVeh(veh, 0)
+									RefreshSwitchHudState()
 								end
 								AUDIO:ResetActivityTimer()
 								count_broadcast_timer = delay_broadcast_timer
@@ -839,8 +1069,9 @@ function MainThread()
 								if state_auxiliary[veh] == 0 then
 									if IsVehicleSirenOn(veh) then
 										AUDIO:Play('Upgrade', AUDIO.upgrade_volume)
-										HUD:SetItemState('siren', true)
+										HUD:SetItemState('siren', GetSirenHudToneState(LVC.auxiliary))
 										SetAuxiliaryStateForVeh(veh, LVC.auxiliary)
+										RefreshSwitchHudState()
 									end
 								else
 									AUDIO:Play('Downgrade', AUDIO.downgrade_volume)
@@ -848,6 +1079,7 @@ function MainThread()
 										HUD:SetItemState('siren', false)
 									end
 									SetAuxiliaryStateForVeh(veh, 0)
+									RefreshSwitchHudState()
 								end
 								AUDIO:ResetActivityTimer()
 								count_broadcast_timer = delay_broadcast_timer
@@ -855,9 +1087,12 @@ function MainThread()
 							-- CYCLE LX SRN TONES
 							if state_lxsiren[veh] > 0 then
 								if IsDisabledControlJustReleased(0, 80) then
+									local new_tone = UTIL:GetNextSirenTone(state_lxsiren[veh], veh, true)
 									AUDIO:Play('Upgrade', AUDIO.upgrade_volume)
 									HUD:SetItemState('horn', false)
-									SetLxSirenStateForVeh(veh, UTIL:GetNextSirenTone(state_lxsiren[veh], veh, true))
+									SetLxSirenStateForVeh(veh, new_tone)
+									HUD:SetItemState('siren', GetSirenHudToneState(new_tone))
+									RefreshSwitchHudState()
 									count_broadcast_timer = delay_broadcast_timer
 								elseif IsDisabledControlPressed(0, 80) then
 									HUD:SetItemState('horn', true)
@@ -869,36 +1104,55 @@ function MainThread()
 								if IsDisabledControlPressed(0, 80) then
 									AUDIO:ResetActivityTimer()
 									actv_manu = true
-									HUD:SetItemState('siren', true)
+									RefreshSirenHudState()
 								else
 									if actv_manu then
-										HUD:SetItemState('siren', false)
+										actv_manu = false
+										RefreshSirenHudState()
+									else
+										actv_manu = false
 									end
-									actv_manu = false
 								end
 							else
 								if actv_manu then
-									HUD:SetItemState('siren', false)
+									actv_manu = false
+									RefreshSirenHudState()
+								else
+									actv_manu = false
 								end
-								actv_manu = false
 							end
 
 							-- TOG RUMBLER (LSHIFT+E)
-							if LVC.rumbler and LVC.rumbler_enabled and IsControlPressed(0, 131) and MCTRL:GetSirenMode() ~= MCTRL.LOCAL then
+							if not IsHandsfreeEnabled(veh) and LVC.rumbler and LVC.rumbler_enabled and IsControlPressed(0, 131) and MCTRL:GetSirenMode() ~= MCTRL.LOCAL then
 								if IsDisabledControlJustReleased(0, 86) and state_lxsiren[veh] > 0 then
 									MCTRL:SetTempRumblerMode(true)
 								end
 							end
 
+							-- HANDSFREE HORN CONTROL
+							HandleHandsfreeHorn()
+
 							-- HORN
-							if IsDisabledControlPressed(0, 86) and not (IsControlPressed(0, 131) and LVC.rumbler_enabled) then
+							if not IsHandsfreeEnabled(veh) and IsDisabledControlPressed(0, 86) and not (IsControlPressed(0, 131) and LVC.rumbler_enabled) then
 								actv_horn = true
 								AUDIO:ResetActivityTimer()
-								HUD:SetItemState('horn', true)
+
+								-- If horn is being used as the manual secondary tone,
+								-- keep the horn button visually off. The siren element
+								-- already shows this state as siren_yelp.
+								if actv_manu then
+									HUD:SetItemState('horn', false)
+									RefreshSirenHudState()
+								else
+									HUD:SetItemState('horn', true)
+								end
 							else
 								if actv_horn or actv_manu then
 									HUD:SetItemState('horn', false)
 									actv_horn = false
+									if actv_manu then
+										RefreshSirenHudState()
+									end
 								end
 							end
 

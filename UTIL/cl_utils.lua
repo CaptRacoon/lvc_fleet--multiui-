@@ -143,6 +143,12 @@ function UTIL:UpdateCurrentVCFData(veh, reset)
 	HORNS = profile_data.HORNS
 	SIRENS = profile_data.SIRENS
 
+	-- HUD UI module is selected by the active audio scheme in the VCF XML.
+	-- Example: <SCHEME String="ZTEP103"/> -> UI/modules/ztep103/.
+	if HUD.ApplyHudModuleFromScheme ~= nil then
+		HUD:ApplyHudModuleFromScheme(true)
+	end
+
 	-- HUD Options
 	HUD:SetHudState(HUD.enabled)
 	--Rumbler Settings
